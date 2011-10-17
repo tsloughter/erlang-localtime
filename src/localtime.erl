@@ -22,13 +22,39 @@
 
 -export(
   [
-     utc_to_local/2
+     utc_to_local_seconds/2
+     ,utc_to_local/2
      ,local_to_utc/2
      ,local_to_local/3
      ,tz_name/2
      ,tz_shift/2
      ,tz_shift/3
   ]).
+
+-spec utc_to_local_seconds(integer(), list()) -> integer() | {error, atom()}.
+utc_to_local_seconds(UtcSeconds, Timezone) when is_integer(UtcSeconds) ->
+   case lists:keyfind(get_timezone(Timezone), 1, ?tz_database) of
+      false ->
+         {error, unknown_tz};
+      {_Tz, _, _, Shift, _DstShift, undef, _DstStartTime, undef, _DstEndTime} ->
+         adjust_datetime(UtcSeconds, Shift);
+      TzRule = {_, _, _, Shift, DstShift, _, _, _, _} ->
+         LocalDateTime = adjust_datetime(UtcSeconds, Shift),
+         case localtime_dst:check(calendar:gregorian_seconds_to_datetime(LocalDateTime), TzRule) of
+            Res when (Res == is_in_dst) or (Res == time_not_exists) ->
+               adjust_datetime(LocalDateTime, DstShift);
+            is_not_in_dst ->
+               LocalDateTime;
+            ambiguous_time ->
+               RecheckIt = adjust_datetime(LocalDateTime, DstShift),
+               case localtime_dst:check(RecheckIt, TzRule) of
+                  ambiguous_time ->
+                     RecheckIt;
+                  _ ->
+                     LocalDateTime
+               end
+         end
+   end.
 
 % utc_to_local(UtcDateTime, Timezone) -> LocalDateTime | {error, ErrDescr}
 %  UtcDateTime = DateTime()
@@ -172,6 +198,9 @@ tz_shift(LocalDateTime, TimezoneFrom, TimezoneTo) ->
 % =======================================================================
 % privates
 % =======================================================================
+
+adjust_datetime(Seconds, Minutes) when is_integer(Seconds) ->
+    Seconds + Minutes * 60;
 
 adjust_datetime(DateTime, Minutes) ->
    Seconds = calendar:datetime_to_gregorian_seconds(DateTime) + Minutes * 60,
